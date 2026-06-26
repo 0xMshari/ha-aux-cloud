@@ -191,6 +191,25 @@ class TestAuxCloudAPI:
         assert parse_device_stats_total(response) == 2.0
 
     def test_parse_device_stats_total_from_total_field(self):
-        """Test reading a pre-aggregated total from stats."""
-        response = {"device": [{"total": 42.5}]}
+        """Test reading values from legacy device.data rows."""
+        response = {"device": [{"data": [{"tenelec": 42.5}]}]}
         assert parse_device_stats_total(response) == 42.5
+
+    def test_parse_device_stats_total_from_table(self):
+        """Test reading values from table response format."""
+        response = {
+            "msg": "ok",
+            "status": 0,
+            "table": [
+                {
+                    "cnt": 2,
+                    "did": "00000000000000000000907abe09717d",
+                    "total": 2,
+                    "values": [
+                        {"occurtime": "2026-06-26_10:00:00", "tenelec": 1.1875},
+                        {"occurtime": "2026-06-26_11:00:00", "tenelec": 1.15625},
+                    ],
+                }
+            ],
+        }
+        assert parse_device_stats_total(response) == 2.34375

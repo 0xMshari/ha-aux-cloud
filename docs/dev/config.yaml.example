@@ -1,0 +1,4 @@
+email: "your@email.com"
+password: yourpassword
+region: usa  # eu, usa, cn, or rus
+shared: false

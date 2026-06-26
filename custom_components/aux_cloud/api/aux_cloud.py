@@ -111,10 +111,40 @@ def _parse_stat_row_value(row: dict, param: str) -> float | None:
     return None
 
 
+def _sum_stat_values(rows: list, param: str) -> float | None:
+    total = 0.0
+    found = False
+
+    for row in rows:
+        if isinstance(row, dict):
+            value = _parse_stat_row_value(row, param)
+        else:
+            try:
+                value = float(row)
+            except (TypeError, ValueError):
+                value = None
+        if value is not None:
+            total += value
+            found = True
+
+    return total if found else None
+
+
 def parse_device_stats_total(response: dict, param: str = "tenelec") -> float | None:
     """Extract total energy (kWh) from a device stats API response."""
     if not isinstance(response, dict):
         return None
+
+    if response.get("status") not in (0, "0", None):
+        return None
+
+    table = response.get("table")
+    if isinstance(table, list) and table:
+        entry = table[0]
+        if isinstance(entry, dict):
+            values = entry.get("values")
+            if isinstance(values, list):
+                return _sum_stat_values(values, param)
 
     devices = response.get("device")
     if not isinstance(devices, list) or not devices:
@@ -124,45 +154,23 @@ def parse_device_stats_total(response: dict, param: str = "tenelec") -> float | 
     if not isinstance(device_data, dict):
         return None
 
-    for key in ("total", "sum", param):
-        if key not in device_data:
-            continue
-        try:
-            return float(device_data[key])
-        except (TypeError, ValueError):
-            continue
+    values = device_data.get("values")
+    if isinstance(values, list):
+        return _sum_stat_values(values, param)
 
     data = device_data.get("data")
     if data is None:
         return None
 
-    total = 0.0
-    found = False
-
     if isinstance(data, list):
-        for row in data:
-            if not isinstance(row, dict):
-                continue
-            value = _parse_stat_row_value(row, param)
-            if value is not None:
-                total += value
-                found = True
-    elif isinstance(data, dict):
+        return _sum_stat_values(data, param)
+
+    if isinstance(data, dict):
         rows = data.get(param) or data.get("list") or []
         if isinstance(rows, list):
-            for row in rows:
-                if isinstance(row, dict):
-                    value = _parse_stat_row_value(row, param)
-                else:
-                    try:
-                        value = float(row)
-                    except (TypeError, ValueError):
-                        value = None
-                if value is not None:
-                    total += value
-                    found = True
+            return _sum_stat_values(rows, param)
 
-    return total if found else None
+    return None
 
 
 class DirectiveStuData(TypedDict):

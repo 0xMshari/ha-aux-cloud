@@ -212,13 +212,23 @@ class AuxCloudStatsCoordinator(DataUpdateCoordinator):
             for report_type in ENERGY_STATS_REPORT_TYPES:
                 try:
                     raw = await self.api.get_device_stats(device, report_type)
+                    total_kwh = parse_device_stats_total(raw)
+                    data_points = _count_stats_data_points(raw)
+                    if total_kwh is None:
+                        _LOGGER.warning(
+                            "Energy stats for %s (%s) returned no usable data. "
+                            "Check region setting and API response: %s",
+                            endpoint_id,
+                            report_type,
+                            raw,
+                        )
                     stats[endpoint_id][report_type] = {
-                        "total_kwh": parse_device_stats_total(raw),
-                        "data_points": _count_stats_data_points(raw),
+                        "total_kwh": total_kwh,
+                        "data_points": data_points,
                     }
                 except Exception as exc:
-                    _LOGGER.debug(
-                        "Energy stats unavailable for %s (%s): %s",
+                    _LOGGER.warning(
+                        "Energy stats request failed for %s (%s): %s",
                         endpoint_id,
                         report_type,
                         exc,
@@ -230,11 +240,31 @@ class AuxCloudStatsCoordinator(DataUpdateCoordinator):
 
 def _count_stats_data_points(response: dict) -> int:
     """Count rows returned in a stats response."""
-    devices = response.get("device") if isinstance(response, dict) else None
+    if not isinstance(response, dict):
+        return 0
+
+    table = response.get("table")
+    if isinstance(table, list) and table and isinstance(table[0], dict):
+        values = table[0].get("values")
+        if isinstance(values, list):
+            return len(values)
+        cnt = table[0].get("cnt")
+        if isinstance(cnt, int):
+            return cnt
+
+    devices = response.get("device")
     if not isinstance(devices, list) or not devices:
         return 0
 
-    data = devices[0].get("data") if isinstance(devices[0], dict) else None
+    device_data = devices[0]
+    if not isinstance(device_data, dict):
+        return 0
+
+    values = device_data.get("values")
+    if isinstance(values, list):
+        return len(values)
+
+    data = device_data.get("data")
     if isinstance(data, list):
         return len(data)
     if isinstance(data, dict):
