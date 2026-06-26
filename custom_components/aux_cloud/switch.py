@@ -24,6 +24,9 @@ from .api.const import (
 from .const import DOMAIN, _LOGGER
 from .util import BaseEntity
 
+# Exposed on the climate entity — skip duplicate switch entities for AC units.
+AC_CLIMATE_SWITCH_KEYS = {AC_POWER, AUX_ECOMODE, AC_SLEEP}
+
 SWITCHES = {
     AUX_ECOMODE: {
         "description": SwitchEntityDescription(
@@ -165,6 +168,12 @@ async def async_setup_entry(
                     and entity["description"].key in supported_special_params
                 )
             ):
+                if (
+                    device.get("productId") in AuxProducts.DeviceType.AC_GENERIC
+                    and entity["description"].key in AC_CLIMATE_SWITCH_KEYS
+                ):
+                    continue
+
                 entities.append(
                     AuxSwitchEntity(
                         coordinator,

@@ -9,12 +9,16 @@ from homeassistant.components.climate import (
 )
 from homeassistant.components.climate.const import (
     FAN_AUTO,
+    FAN_LOW,
+    FAN_MEDIUM,
+    FAN_HIGH,
     SWING_OFF,
-    SWING_HORIZONTAL,
-    SWING_VERTICAL,
-    SWING_BOTH,
+    SWING_ON,
+    SWING_HORIZONTAL_OFF,
+    SWING_HORIZONTAL_ON,
     PRESET_ECO,
     PRESET_NONE,
+    PRESET_SLEEP,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
@@ -36,6 +40,7 @@ from .api.const import (
     HP_MODE_COOLING,
     HP_MODE_HEATING,
     AuxProducts,
+    AUX_ECOMODE,
     AUX_ECOMODE_OFF,
     AUX_ECOMODE_ON,
     HP_HEATER_TEMPERATURE_TARGET,
@@ -45,6 +50,9 @@ from .api.const import (
     AC_POWER,
     AC_POWER_OFF,
     AC_POWER_ON,
+    AC_SLEEP,
+    AC_SLEEP_OFF,
+    AC_SLEEP_ON,
     ACFanSpeed,
 )
 from .const import (
@@ -227,17 +235,27 @@ class AuxACClimateEntity(BaseEntity, CoordinatorEntity, ClimateEntity):
         self._attr_supported_features = (
             ClimateEntityFeature.TARGET_TEMPERATURE
             | ClimateEntityFeature.FAN_MODE
+            | ClimateEntityFeature.PRESET_MODE
             | ClimateEntityFeature.SWING_MODE
+            | ClimateEntityFeature.SWING_HORIZONTAL_MODE
             | ClimateEntityFeature.TURN_ON
             | ClimateEntityFeature.TURN_OFF
         )
         self._attr_hvac_modes = [HVACMode.OFF, *MODE_MAP_AUX_AC_TO_HA.values()]
-        self._attr_fan_modes = list(FAN_MODE_HA_TO_AUX.keys())
-        self._attr_swing_modes = [
-            SWING_OFF,
-            SWING_VERTICAL,
-            SWING_HORIZONTAL,
-            SWING_BOTH,
+        # Standard modes first — HomeKit maps auto/low/medium/high reliably.
+        self._attr_fan_modes = [
+            FAN_AUTO,
+            FAN_LOW,
+            FAN_MEDIUM,
+            FAN_HIGH,
+            "turbo",
+            "silent",
+        ]
+        self._attr_preset_modes = [PRESET_NONE, PRESET_ECO, PRESET_SLEEP]
+        self._attr_swing_modes = [SWING_OFF, SWING_ON]
+        self._attr_swing_horizontal_modes = [
+            SWING_HORIZONTAL_OFF,
+            SWING_HORIZONTAL_ON,
         ]
         self._attr_min_temp = 16
         self._attr_max_temp = 32
@@ -323,44 +341,68 @@ class AuxACClimateEntity(BaseEntity, CoordinatorEntity, ClimateEntity):
         if fan_mode is None:
             return
 
-        await self._set_device_params({AC_FAN_SPEED: FAN_MODE_HA_TO_AUX[fan_mode]})
+        aux_speed = FAN_MODE_HA_TO_AUX.get(fan_mode)
+        if aux_speed is None:
+            _LOGGER.warning("Unsupported fan mode %s for %s", fan_mode, self._device_id)
+            return
+
+        await self._set_device_params({AC_FAN_SPEED: aux_speed})
+
+    @property
+    def preset_mode(self):
+        """Return the current preset mode."""
+        params = self._get_device_params()
+        if params.get(AC_SLEEP):
+            return PRESET_SLEEP
+        if params.get(AUX_ECOMODE):
+            return PRESET_ECO
+        return PRESET_NONE
+
+    async def async_set_preset_mode(self, preset_mode: str):
+        """Set the preset mode."""
+        if preset_mode == PRESET_SLEEP:
+            await self._set_device_params({**AC_SLEEP_ON, **AUX_ECOMODE_OFF})
+        elif preset_mode == PRESET_ECO:
+            await self._set_device_params({**AUX_ECOMODE_ON, **AC_SLEEP_OFF})
+        else:
+            await self._set_device_params({**AUX_ECOMODE_OFF, **AC_SLEEP_OFF})
 
     @property
     def swing_mode(self):
-        """Return the swing mode."""
-        horizontal = bool(self._get_device_params().get(AC_SWING_HORIZONTAL, 0))
-        vertical = bool(self._get_device_params().get(AC_SWING_VERTICAL, 0))
+        """Return vertical swing state."""
+        if self._get_device_params().get(AC_SWING_VERTICAL, 0):
+            return SWING_ON
+        return SWING_OFF
 
-        return (
-            SWING_BOTH
-            if horizontal and vertical
-            else (
-                SWING_HORIZONTAL
-                if horizontal
-                else SWING_VERTICAL if vertical else SWING_OFF
-            )
-        )
+    @property
+    def swing_horizontal_mode(self):
+        """Return horizontal swing state."""
+        if self._get_device_params().get(AC_SWING_HORIZONTAL, 0):
+            return SWING_HORIZONTAL_ON
+        return SWING_HORIZONTAL_OFF
 
     async def async_set_swing_mode(self, swing_mode):
-        """Set new swing mode."""
-        params = {
-            **(
-                AC_SWING_VERTICAL_ON
-                if swing_mode in [SWING_VERTICAL, SWING_BOTH]
-                else AC_SWING_VERTICAL_OFF
-            ),
-            **(
-                AC_SWING_HORIZONTAL_ON
-                if swing_mode in [SWING_HORIZONTAL, SWING_BOTH]
-                else AC_SWING_HORIZONTAL_OFF
-            ),
-        }
+        """Set vertical swing."""
+        if swing_mode == SWING_ON:
+            await self._set_device_params(AC_SWING_VERTICAL_ON)
+        else:
+            await self._set_device_params(AC_SWING_VERTICAL_OFF)
 
-        await self._set_device_params(params)
+    async def async_set_swing_horizontal_mode(self, swing_mode):
+        """Set horizontal swing."""
+        if swing_mode == SWING_HORIZONTAL_ON:
+            await self._set_device_params(AC_SWING_HORIZONTAL_ON)
+        else:
+            await self._set_device_params(AC_SWING_HORIZONTAL_OFF)
 
     async def async_turn_on(self):
-        """Async turn the entity on."""
-        await self._set_device_params(AC_POWER_ON)
+        """Turn the AC on, restoring the last HVAC mode when possible."""
+        mode = self._get_device_params().get(AUX_MODE)
+        ha_mode = MODE_MAP_AUX_AC_TO_HA.get(mode)
+        if ha_mode and ha_mode != HVACMode.OFF:
+            await self.async_set_hvac_mode(ha_mode)
+        else:
+            await self.async_set_hvac_mode(HVACMode.COOL)
 
     async def async_turn_off(self):
         """Async turn the entity off."""
