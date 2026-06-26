@@ -11,7 +11,8 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api.aux_cloud import AuxCloudAPI
+from .api.aux_cloud import AuxCloudAPI, ReportType, parse_device_stats_total
+from .api.const import AuxProducts
 from .const import (
     _LOGGER,
     DOMAIN,
@@ -21,6 +22,8 @@ from .const import (
 )
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
+STATS_UPDATE_INTERVAL = timedelta(minutes=15)
+ENERGY_STATS_REPORT_TYPES: tuple[ReportType, ...] = ("day", "month", "year")
 
 # Schema to include email and password (device selection is handled in config flow)
 CONFIG_SCHEMA = vol.Schema(
@@ -167,6 +170,80 @@ class AuxCloudCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error updating AUX Cloud data: {e}") from e
 
 
+class AuxCloudStatsCoordinator(DataUpdateCoordinator):
+    """Fetch historical energy statistics from AUX Cloud."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        api: AuxCloudAPI,
+        device_coordinator: AuxCloudCoordinator,
+    ):
+        """Initialize the stats coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name="AUX Cloud Stats Coordinator",
+            update_interval=STATS_UPDATE_INTERVAL,
+        )
+        self.api = api
+        self.device_coordinator = device_coordinator
+
+    async def _async_update_data(self):
+        """Fetch energy statistics for supported devices."""
+        devices = self.device_coordinator.data.get("devices", []) if self.device_coordinator.data else []
+        stats: dict[str, dict[str, dict | None]] = {}
+
+        for device in devices:
+            product_id = device.get("productId")
+            endpoint_id = device.get("endpointId")
+            if not product_id or not endpoint_id:
+                continue
+            if not AuxProducts.supports_energy_stats(product_id):
+                continue
+            if not device.get("familyid"):
+                _LOGGER.debug(
+                    "Skipping energy stats for %s: missing familyid",
+                    endpoint_id,
+                )
+                continue
+
+            stats[endpoint_id] = {}
+            for report_type in ENERGY_STATS_REPORT_TYPES:
+                try:
+                    raw = await self.api.get_device_stats(device, report_type)
+                    stats[endpoint_id][report_type] = {
+                        "total_kwh": parse_device_stats_total(raw),
+                        "data_points": _count_stats_data_points(raw),
+                    }
+                except Exception as exc:
+                    _LOGGER.debug(
+                        "Energy stats unavailable for %s (%s): %s",
+                        endpoint_id,
+                        report_type,
+                        exc,
+                    )
+                    stats[endpoint_id][report_type] = None
+
+        return {"stats": stats}
+
+
+def _count_stats_data_points(response: dict) -> int:
+    """Count rows returned in a stats response."""
+    devices = response.get("device") if isinstance(response, dict) else None
+    if not isinstance(devices, list) or not devices:
+        return 0
+
+    data = devices[0].get("data") if isinstance(devices[0], dict) else None
+    if isinstance(data, list):
+        return len(data)
+    if isinstance(data, dict):
+        for value in data.values():
+            if isinstance(value, list):
+                return len(value)
+    return 0
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AUX Cloud from a config entry."""
     region = entry.data.get(CONF_REGION, "eu")
@@ -194,9 +271,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Perform an initial update
     await coordinator.async_config_entry_first_refresh()
 
+    stats_coordinator = AuxCloudStatsCoordinator(hass, api, coordinator)
+    await stats_coordinator.async_config_entry_first_refresh()
+
     # Store the coordinator for platform use
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
+        "stats_coordinator": stats_coordinator,
         "api": api,
     }
 

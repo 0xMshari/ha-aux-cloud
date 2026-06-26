@@ -64,6 +64,15 @@
       },
       "ac_temperature": {
         "name": "AC Temperature"
+      },
+      "energy_consumption_day": {
+        "name": "Energy Consumption Today"
+      },
+      "energy_consumption_month": {
+        "name": "Energy Consumption This Month"
+      },
+      "energy_consumption_year": {
+        "name": "Energy Consumption This Year"
       }
     },
     "water_heater": {

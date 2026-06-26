@@ -230,6 +230,13 @@ class AuxProducts:
         return None
 
     @staticmethod
+    def supports_energy_stats(product_id: str) -> bool:
+        """Return True if the device type exposes cloud energy statistics."""
+        return product_id in AuxProducts.DeviceType.AC_GENERIC or (
+            product_id in AuxProducts.DeviceType.HEAT_PUMP
+        )
+
+    @staticmethod
     def is_v3_heat_pump(device: dict) -> bool:
         """Determine if a device is a v3 or later heat pump based on its parameters."""
         try:

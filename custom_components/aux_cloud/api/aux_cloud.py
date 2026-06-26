@@ -4,7 +4,9 @@ import hashlib
 import json
 import logging
 import time
-from typing import TypedDict
+from calendar import monthrange
+from datetime import date
+from typing import Literal, TypedDict
 
 import aiohttp
 
@@ -58,6 +60,109 @@ API_SERVER_URL_CN = "https://app-service-chn-31a93883.ibroadlink.com"
 API_SERVER_URL_RUS = "https://app-service-rus-b8bbc3be.smarthomecs.com"
 
 _LOGGER = logging.getLogger(__package__)
+
+ReportType = Literal["day", "month", "year"]
+
+REPORT_TYPE_TO_REPORT = {
+    "day": "fw_auxoverseadayconsum_v1",
+    "month": "fw_auxoverseamonthconsum_v1",
+    "year": "fw_auxoverseayearconsum_v1",
+}
+
+
+def _product_id_to_devtype(product_id: str) -> int:
+    """Convert a productId hex string to the devtype integer used by stats API."""
+    return int.from_bytes(bytes.fromhex(product_id[-8:-4]), "little")
+
+
+def _build_stats_date_range(
+    report_type: ReportType, ref: date | None = None
+) -> tuple[str, str]:
+    """Build start/end timestamps for the device stats API."""
+    ref = ref or date.today()
+
+    if report_type == "year":
+        return (
+            f"{ref.year}-01-00_00:00:00",
+            f"{ref.year}-12-31_23:59:59",
+        )
+
+    if report_type == "month":
+        last_day = monthrange(ref.year, ref.month)[1]
+        return (
+            f"{ref.year}-{ref.month:02d}-00_00:00:00",
+            f"{ref.year}-{ref.month:02d}-{last_day:02d}_23:59:59",
+        )
+
+    return (
+        f"{ref.year}-{ref.month:02d}-{ref.day:02d}_00:00:00",
+        f"{ref.year}-{ref.month:02d}-{ref.day:02d}_23:59:59",
+    )
+
+
+def _parse_stat_row_value(row: dict, param: str) -> float | None:
+    for key in (param, "val", "value", "v"):
+        if key not in row:
+            continue
+        try:
+            return float(row[key])
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def parse_device_stats_total(response: dict, param: str = "tenelec") -> float | None:
+    """Extract total energy (kWh) from a device stats API response."""
+    if not isinstance(response, dict):
+        return None
+
+    devices = response.get("device")
+    if not isinstance(devices, list) or not devices:
+        return None
+
+    device_data = devices[0]
+    if not isinstance(device_data, dict):
+        return None
+
+    for key in ("total", "sum", param):
+        if key not in device_data:
+            continue
+        try:
+            return float(device_data[key])
+        except (TypeError, ValueError):
+            continue
+
+    data = device_data.get("data")
+    if data is None:
+        return None
+
+    total = 0.0
+    found = False
+
+    if isinstance(data, list):
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            value = _parse_stat_row_value(row, param)
+            if value is not None:
+                total += value
+                found = True
+    elif isinstance(data, dict):
+        rows = data.get(param) or data.get("list") or []
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, dict):
+                    value = _parse_stat_row_value(row, param)
+                else:
+                    try:
+                        value = float(row)
+                    except (TypeError, ValueError):
+                        value = None
+                if value is not None:
+                    total += value
+                    found = True
+
+    return total if found else None
 
 
 class DirectiveStuData(TypedDict):
@@ -131,6 +236,23 @@ class AuxCloudAPI:
             "appPlatform": SPOOF_APP_PLATFORM,
             "loginsession": self.loginsession or "",  # Ensure no None values
             "userid": self.userid or "",  # Ensure no None values
+            **kwargs,
+        }
+
+    def _get_webapi_headers(self, familyid: str, **kwargs: str):
+        return {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "licenseId": LICENSE_ID,
+            "lid": LICENSE_ID,
+            "language": "en",
+            "appVersion": SPOOF_APP_VERSION,
+            "User-Agent": SPOOF_USER_AGENT,
+            "system": SPOOF_SYSTEM,
+            "appPlatform": SPOOF_APP_PLATFORM,
+            "loginsession": self.loginsession or "",
+            "userid": self.userid or "",
+            "familyid": familyid,
             **kwargs,
         }
 
@@ -640,6 +762,83 @@ class AuxCloudAPI:
         params = list(values.keys())
         vals = [[{"idx": 1, "val": x}] for x in list(values.values())]
         return await self._act_device_params(device, "set", params, vals)
+
+    async def get_device_stats(
+        self,
+        device: dict,
+        report_type: ReportType,
+        params: list[str] | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        ref_date: date | None = None,
+        offset: int = 0,
+        step: int = 1000,
+    ):
+        """
+        Query historical device statistics (e.g. energy consumption).
+
+        report_type can be day, month, or year. When start/end are omitted,
+        the range is derived from ref_date (defaults to today).
+        """
+        if not self.is_logged_in():
+            raise AuxApiError("Cannot query device stats without being logged in.")
+
+        familyid = device.get("familyid")
+        if not familyid:
+            raise AuxApiError("Device is missing familyid required for stats queries.")
+
+        product_id = device.get("productId")
+        if not product_id:
+            raise AuxApiError("Device is missing productId required for stats queries.")
+
+        if params is None:
+            params = ["tenelec"]
+
+        if start is None or end is None:
+            default_start, default_end = _build_stats_date_range(report_type, ref_date)
+            start = start or default_start
+            end = end or default_end
+
+        devtype = _product_id_to_devtype(product_id)
+        report = REPORT_TYPE_TO_REPORT[report_type]
+
+        data = {
+            "report": report,
+            "querytype": "stats",
+            "devtype": devtype,
+            "heartbeatHost": "",
+            "device": [
+                {
+                    "did": device["endpointId"],
+                    "devtype": str(devtype),
+                    "offset": offset,
+                    "step": step,
+                    "params": params,
+                    "start": start,
+                    "end": end,
+                    "sortk": "occurtime",
+                    "reportType": report_type,
+                }
+            ],
+        }
+
+        _LOGGER.debug(
+            "Querying device stats for %s (%s, %s to %s)",
+            device["endpointId"],
+            report_type,
+            start,
+            end,
+        )
+
+        json_data = await self._make_request(
+            method="POST",
+            endpoint="appfront/v1/webapi/device/stats",
+            headers=self._get_webapi_headers(familyid=familyid),
+            data=data,
+            ssl=False,
+        )
+
+        return json_data
 
     async def initialize_websocket(self):
         """
