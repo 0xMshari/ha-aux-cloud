@@ -169,7 +169,7 @@ class AuxProducts:
         AC_TENELEC,
     ]
 
-    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL, AC_TENELEC]
+    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL]
 
     HP_PARAMS = [
         "ac_errcode1",

@@ -46,9 +46,19 @@ def load_config() -> dict:
         "  $env:AUX_EMAIL = 'your@email.com'\n"
         "  $env:AUX_PASSWORD = 'yourpassword'\n"
         "  $env:AUX_REGION = 'usa'\n"
-        "  python demo.py\n"
+        "  python demo.py [start-date] [end-date]\n"
     )
     sys.exit(1)
+
+
+def parse_period_args() -> tuple[date, date]:
+    """Parse optional start/end dates from the command line."""
+    if len(sys.argv) >= 3:
+        return date.fromisoformat(sys.argv[1]), date.fromisoformat(sys.argv[2])
+
+    end = date.today()
+    start = end - timedelta(days=6)
+    return start, end
 
 
 if __name__ == "__main__":
@@ -57,6 +67,7 @@ if __name__ == "__main__":
     password: str = config["password"]
     shared: bool = config.get("shared", False)
     region: str = config.get("region", "eu")
+    start_date, end_date = parse_period_args()
 
     async def main():
         cloud = AuxCloudAPI(region=region)
@@ -72,30 +83,21 @@ if __name__ == "__main__":
             print("Devices:")
             pprint.pprint(devices)
             for device in devices:
-                print(f"\n--- Stats for {device.get('friendlyName')} ---")
-                for report_type in ("day", "month", "year"):
-                    try:
-                        raw = await cloud.get_device_stats(device, report_type)
-                        total = parse_device_stats_total(raw)
-                        print(f"\n{report_type} raw response:")
-                        pprint.pprint(raw)
-                        print(f"{report_type} parsed total kWh: {total}")
-                    except Exception as exc:
-                        print(f"{report_type} failed: {exc}")
-
-                print("\n--- Custom period (last 7 days) ---")
+                print(f"\n--- Power consumption for {device.get('friendlyName')} ---")
                 try:
-                    end = date.today()
-                    start = end - timedelta(days=6)
-                    report_type = resolve_stats_report_type(start, end)
-                    raw = await cloud.get_device_stats_for_period(device, start, end)
+                    report_type = resolve_stats_report_type(start_date, end_date)
+                    raw = await cloud.get_device_stats_for_period(
+                        device, start_date, end_date
+                    )
                     total = parse_device_stats_total(raw)
                     values = parse_device_stats_values(raw)
-                    print(f"Period: {start} to {end} ({report_type})")
+                    print(f"Period: {start_date} to {end_date} ({report_type})")
                     print(f"Total kWh: {total}")
                     print(f"Data points: {len(values)}")
+                    print("Values:")
+                    pprint.pprint(values)
                 except Exception as exc:
-                    print(f"Custom period failed: {exc}")
+                    print(f"Power consumption query failed: {exc}")
 
                 params = await cloud.get_device_params(device)
                 print("\nDevice params:")

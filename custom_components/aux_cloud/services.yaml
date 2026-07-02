@@ -1,6 +1,8 @@
 get_power_consumption:
   name: Get power consumption
-  description: Query energy consumption for a device over any date range.
+  description: >-
+    Query power consumption (kWh) for a device over any date range.
+    Returns total usage and per-bucket values for the requested period.
   fields:
     device_id:
       name: Device ID
@@ -25,7 +27,9 @@ get_power_consumption:
         date:
     report_type:
       name: Report type
-      description: Optional granularity (day, month, year). Auto-selected when omitted.
+      description: >-
+        Optional bucket size (day, month, year). When omitted, the best
+        granularity is chosen automatically from the date range.
       required: false
       example: day
       selector:
