@@ -9,7 +9,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfEnergy, UnitOfTemperature
+from homeassistant.const import UnitOfEnergy, UnitOfPower, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -19,6 +19,7 @@ from .api.aux_cloud import ReportType
 from .api.const import (
     AC_TEMPERATURE_AMBIENT,
     AC_TEMPERATURE_TARGET,
+    AC_TENELEC,
     AUX_ERROR_FLAG,
     AuxProducts,
     HP_HOT_WATER_TANK_TEMPERATURE,
@@ -31,7 +32,7 @@ from .util import BaseEntity
 ENERGY_SENSORS: dict[ReportType, SensorEntityDescription] = {
     "day": SensorEntityDescription(
         key="energy_consumption_day",
-        name="Energy Consumption Today",
+        name="Power Consumption Today",
         icon="mdi:lightning-bolt",
         translation_key="energy_consumption_day",
         device_class=SensorDeviceClass.ENERGY,
@@ -40,7 +41,7 @@ ENERGY_SENSORS: dict[ReportType, SensorEntityDescription] = {
     ),
     "month": SensorEntityDescription(
         key="energy_consumption_month",
-        name="Energy Consumption This Month",
+        name="Power Consumption This Month",
         icon="mdi:calendar-month",
         translation_key="energy_consumption_month",
         device_class=SensorDeviceClass.ENERGY,
@@ -49,7 +50,7 @@ ENERGY_SENSORS: dict[ReportType, SensorEntityDescription] = {
     ),
     "year": SensorEntityDescription(
         key="energy_consumption_year",
-        name="Energy Consumption This Year",
+        name="Power Consumption This Year",
         icon="mdi:calendar",
         translation_key="energy_consumption_year",
         device_class=SensorDeviceClass.ENERGY,
@@ -141,6 +142,24 @@ SENSORS: dict[str, dict[str, any]] = {
             device_class="diagnostic",
         ),
         "get_fn": lambda d: d.get("params", {}).get(AUX_ERROR_FLAG, None),
+    },
+    AC_TENELEC: {
+        "type": "power",
+        "param": AC_TENELEC,
+        "description": SensorEntityDescription(
+            key=AC_TENELEC,
+            name="Power Consumption",
+            icon="mdi:flash",
+            translation_key="power_consumption",
+            device_class=SensorDeviceClass.POWER,
+            native_unit_of_measurement=UnitOfPower.WATT,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        "get_fn": lambda d: (
+            d.get("params", {}).get(AC_TENELEC) / 10
+            if d.get("params", {}).get(AC_TENELEC) is not None
+            else None
+        ),
     },
 }
 
@@ -284,15 +303,3 @@ class AuxCloudEnergySensor(CoordinatorEntity, SensorEntity):
         if not report:
             return None
         return report.get("total_kwh")
-
-    @property
-    def extra_state_attributes(self):
-        """Return diagnostic attributes."""
-        stats = self.coordinator.data.get("stats", {}).get(self._device_id, {})
-        report = stats.get(self._report_type)
-        if not report:
-            return {}
-        return {
-            "report_type": self._report_type,
-            "data_points": report.get("data_points"),
-        }

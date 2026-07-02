@@ -17,6 +17,7 @@ AC_POWER_ON = {AC_POWER: 1}
 
 AC_TEMPERATURE_TARGET = "temp"
 AC_TEMPERATURE_AMBIENT = "envtemp"
+AC_TENELEC = "tenelec"
 
 AC_MODE_COOLING = {AUX_MODE: 0}
 AC_MODE_HEATING = {AUX_MODE: 1}
@@ -165,10 +166,10 @@ class AuxProducts:
         "sleepdiy",
         "ac_errcode1",
         "tempunit",
-        "tenelec",  # Unknown, might be available when the device is in specific state
+        AC_TENELEC,
     ]
 
-    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL]
+    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL, AC_TENELEC]
 
     HP_PARAMS = [
         "ac_errcode1",
