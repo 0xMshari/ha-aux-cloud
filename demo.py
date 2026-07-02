@@ -3,12 +3,15 @@ import os
 import pathlib
 import pprint
 import sys
+from datetime import date, timedelta
 
 import yaml
 
 from custom_components.aux_cloud.api.aux_cloud import (
     AuxCloudAPI,
     parse_device_stats_total,
+    parse_device_stats_values,
+    resolve_stats_report_type,
 )
 
 
@@ -79,6 +82,20 @@ if __name__ == "__main__":
                         print(f"{report_type} parsed total kWh: {total}")
                     except Exception as exc:
                         print(f"{report_type} failed: {exc}")
+
+                print("\n--- Custom period (last 7 days) ---")
+                try:
+                    end = date.today()
+                    start = end - timedelta(days=6)
+                    report_type = resolve_stats_report_type(start, end)
+                    raw = await cloud.get_device_stats_for_period(device, start, end)
+                    total = parse_device_stats_total(raw)
+                    values = parse_device_stats_values(raw)
+                    print(f"Period: {start} to {end} ({report_type})")
+                    print(f"Total kWh: {total}")
+                    print(f"Data points: {len(values)}")
+                except Exception as exc:
+                    print(f"Custom period failed: {exc}")
 
                 params = await cloud.get_device_params(device)
                 print("\nDevice params:")

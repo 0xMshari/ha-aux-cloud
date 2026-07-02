@@ -20,6 +20,7 @@ from .const import (
     PLATFORMS,
     CONF_SELECTED_DEVICES,
 )
+from .service import async_register_services
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
 STATS_UPDATE_INTERVAL = timedelta(minutes=15)
@@ -312,6 +313,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    async_register_services(hass)
 
     return True
 

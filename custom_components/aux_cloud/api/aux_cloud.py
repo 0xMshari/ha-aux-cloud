@@ -100,6 +100,73 @@ def _build_stats_date_range(
     )
 
 
+def build_stats_date_range_from_dates(
+    start: date, end: date
+) -> tuple[str, str]:
+    """Build start/end timestamps for an arbitrary date range."""
+    if end < start:
+        start, end = end, start
+
+    return (
+        f"{start.year}-{start.month:02d}-{start.day:02d}_00:00:00",
+        f"{end.year}-{end.month:02d}-{end.day:02d}_23:59:59",
+    )
+
+
+def resolve_stats_report_type(start: date, end: date) -> ReportType:
+    """Choose report granularity based on how long the period is."""
+    if end < start:
+        start, end = end, start
+
+    span_days = (end - start).days + 1
+
+    if span_days <= 31:
+        return "day"
+    if span_days <= 366:
+        return "month"
+    return "year"
+
+
+def _extract_stats_rows(response: dict, param: str = "tenelec") -> list:
+    """Return raw stat rows from a device stats API response."""
+    if not isinstance(response, dict):
+        return []
+
+    if response.get("status") not in (0, "0", None):
+        return []
+
+    table = response.get("table")
+    if isinstance(table, list) and table:
+        entry = table[0]
+        if isinstance(entry, dict):
+            values = entry.get("values")
+            if isinstance(values, list):
+                return values
+
+    devices = response.get("device")
+    if not isinstance(devices, list) or not devices:
+        return []
+
+    device_data = devices[0]
+    if not isinstance(device_data, dict):
+        return []
+
+    values = device_data.get("values")
+    if isinstance(values, list):
+        return values
+
+    data = device_data.get("data")
+    if isinstance(data, list):
+        return data
+
+    if isinstance(data, dict):
+        rows = data.get(param) or data.get("list") or []
+        if isinstance(rows, list):
+            return rows
+
+    return []
+
+
 def _parse_stat_row_value(row: dict, param: str) -> float | None:
     for key in (param, "val", "value", "v"):
         if key not in row:
@@ -130,47 +197,18 @@ def _sum_stat_values(rows: list, param: str) -> float | None:
     return total if found else None
 
 
+def parse_device_stats_values(response: dict, param: str = "tenelec") -> list[dict]:
+    """Extract stat rows from a device stats API response."""
+    rows = _extract_stats_rows(response, param)
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def parse_device_stats_total(response: dict, param: str = "tenelec") -> float | None:
     """Extract total energy (kWh) from a device stats API response."""
-    if not isinstance(response, dict):
+    rows = _extract_stats_rows(response, param)
+    if not rows:
         return None
-
-    if response.get("status") not in (0, "0", None):
-        return None
-
-    table = response.get("table")
-    if isinstance(table, list) and table:
-        entry = table[0]
-        if isinstance(entry, dict):
-            values = entry.get("values")
-            if isinstance(values, list):
-                return _sum_stat_values(values, param)
-
-    devices = response.get("device")
-    if not isinstance(devices, list) or not devices:
-        return None
-
-    device_data = devices[0]
-    if not isinstance(device_data, dict):
-        return None
-
-    values = device_data.get("values")
-    if isinstance(values, list):
-        return _sum_stat_values(values, param)
-
-    data = device_data.get("data")
-    if data is None:
-        return None
-
-    if isinstance(data, list):
-        return _sum_stat_values(data, param)
-
-    if isinstance(data, dict):
-        rows = data.get(param) or data.get("list") or []
-        if isinstance(rows, list):
-            return _sum_stat_values(rows, param)
-
-    return None
+    return _sum_stat_values(rows, param)
 
 
 class DirectiveStuData(TypedDict):
@@ -774,10 +812,12 @@ class AuxCloudAPI:
     async def get_device_stats(
         self,
         device: dict,
-        report_type: ReportType,
+        report_type: ReportType | None = None,
         params: list[str] | None = None,
         start: str | None = None,
         end: str | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
         ref_date: date | None = None,
         offset: int = 0,
         step: int = 1000,
@@ -785,8 +825,9 @@ class AuxCloudAPI:
         """
         Query historical device statistics (e.g. energy consumption).
 
-        report_type can be day, month, or year. When start/end are omitted,
-        the range is derived from ref_date (defaults to today).
+        Provide either report_type (with optional ref_date) or start_date/end_date
+        for an arbitrary period. When start_date/end_date are used without
+        report_type, granularity is chosen automatically.
         """
         if not self.is_logged_in():
             raise AuxApiError("Cannot query device stats without being logged in.")
@@ -801,6 +842,20 @@ class AuxCloudAPI:
 
         if params is None:
             params = ["tenelec"]
+
+        if start_date is not None or end_date is not None:
+            period_start = start_date or end_date or date.today()
+            period_end = end_date or start_date or date.today()
+            if report_type is None:
+                report_type = resolve_stats_report_type(period_start, period_end)
+            if start is None or end is None:
+                range_start, range_end = build_stats_date_range_from_dates(
+                    period_start, period_end
+                )
+                start = start or range_start
+                end = end or range_end
+        elif report_type is None:
+            report_type = "day"
 
         if start is None or end is None:
             default_start, default_end = _build_stats_date_range(report_type, ref_date)
@@ -847,6 +902,23 @@ class AuxCloudAPI:
         )
 
         return json_data
+
+    async def get_device_stats_for_period(
+        self,
+        device: dict,
+        start_date: date,
+        end_date: date,
+        report_type: ReportType | None = None,
+        params: list[str] | None = None,
+    ):
+        """Query consumption for any date range."""
+        return await self.get_device_stats(
+            device,
+            report_type=report_type,
+            start_date=start_date,
+            end_date=end_date,
+            params=params,
+        )
 
     async def initialize_websocket(self):
         """

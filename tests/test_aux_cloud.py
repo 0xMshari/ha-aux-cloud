@@ -12,6 +12,8 @@ from custom_components.aux_cloud.api.aux_cloud import (
     API_SERVER_URL_CN,
     _build_stats_date_range,
     _product_id_to_devtype,
+    build_stats_date_range_from_dates,
+    resolve_stats_report_type,
     parse_device_stats_total,
 )
 
@@ -106,6 +108,21 @@ class TestAuxCloudAPI:
             "2026-06-26_23:59:59",
         )
 
+    def test_build_stats_date_range_from_dates(self):
+        """Test arbitrary date range formatting."""
+        assert build_stats_date_range_from_dates(
+            date(2026, 6, 20), date(2026, 6, 26)
+        ) == (
+            "2026-06-20_00:00:00",
+            "2026-06-26_23:59:59",
+        )
+
+    def test_resolve_stats_report_type(self):
+        """Test automatic report granularity selection."""
+        assert resolve_stats_report_type(date(2026, 6, 1), date(2026, 6, 7)) == "day"
+        assert resolve_stats_report_type(date(2026, 1, 1), date(2026, 6, 1)) == "month"
+        assert resolve_stats_report_type(date(2024, 1, 1), date(2026, 1, 1)) == "year"
+
     @pytest.mark.asyncio
     async def test_get_device_stats(self, aux_api):
         """Test device stats query payload and endpoint."""
@@ -175,6 +192,33 @@ class TestAuxCloudAPI:
                     mock_request.call_args.kwargs["data"]["device"][0]["reportType"]
                     == report_type
                 )
+
+    @pytest.mark.asyncio
+    async def test_get_device_stats_custom_period(self, aux_api):
+        """Test stats query for an arbitrary date range."""
+        aux_api.loginsession = "session"
+        aux_api.userid = "user"
+        device = {
+            "endpointId": "did",
+            "productId": "000000000000000000000000c3aa0000",
+            "familyid": "family",
+        }
+
+        with patch.object(
+            aux_api, "_make_request", new_callable=AsyncMock
+        ) as mock_request:
+            mock_request.return_value = {}
+            await aux_api.get_device_stats_for_period(
+                device,
+                date(2026, 6, 20),
+                date(2026, 6, 26),
+            )
+
+        call_kwargs = mock_request.call_args.kwargs
+        assert call_kwargs["data"]["report"] == "fw_auxoverseadayconsum_v1"
+        assert call_kwargs["data"]["device"][0]["start"] == "2026-06-20_00:00:00"
+        assert call_kwargs["data"]["device"][0]["end"] == "2026-06-26_23:59:59"
+        assert call_kwargs["data"]["device"][0]["reportType"] == "day"
 
     def test_parse_device_stats_total_from_rows(self):
         """Test summing energy values from stats rows."""

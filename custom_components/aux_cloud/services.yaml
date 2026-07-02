@@ -1,0 +1,36 @@
+get_power_consumption:
+  name: Get power consumption
+  description: Query energy consumption for a device over any date range.
+  fields:
+    device_id:
+      name: Device ID
+      description: The AUX Cloud endpoint ID of the device.
+      required: true
+      example: "00000000000000000000907abe09717d"
+      selector:
+        text:
+    start_date:
+      name: Start date
+      description: First day of the period (YYYY-MM-DD).
+      required: true
+      example: "2026-06-01"
+      selector:
+        date:
+    end_date:
+      name: End date
+      description: Last day of the period (YYYY-MM-DD).
+      required: true
+      example: "2026-06-26"
+      selector:
+        date:
+    report_type:
+      name: Report type
+      description: Optional granularity (day, month, year). Auto-selected when omitted.
+      required: false
+      example: day
+      selector:
+        select:
+          options:
+            - day
+            - month
+            - year
