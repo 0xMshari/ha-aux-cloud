@@ -1,4 +1,6 @@
 import logging
+from datetime import timedelta
+
 from homeassistant.const import Platform
 from homeassistant.components.climate import (
     HVACMode,
@@ -27,6 +29,18 @@ DATA_AUX_CLOUD_CONFIG = "aux_cloud_config"
 # Configuration constants
 CONF_FAMILIES = "families"
 CONF_SELECTED_DEVICES = "selected_devices"
+CONF_POWER_START_DATE = "power_start_date"
+CONF_POWER_END_DATE = "power_end_date"
+
+# Power consumption
+POWER_CONSUMPTION_KEY = "power_consumption"
+POWER_UPDATE_INTERVAL = timedelta(minutes=15)
+STALE_POWER_UNIQUE_ID_SUFFIXES = (
+    "_energy_consumption_day",
+    "_energy_consumption_month",
+    "_energy_consumption_year",
+    "_tenelec",
+)
 
 # Map AUX AC modes to Home Assistant HVAC modes
 MODE_MAP_AUX_AC_TO_HA = {

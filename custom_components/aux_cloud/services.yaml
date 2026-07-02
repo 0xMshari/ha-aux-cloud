@@ -1,8 +1,8 @@
 get_power_consumption:
   name: Get power consumption
   description: >-
-    Query power consumption (kWh) for a device over any date range.
-    Returns total usage and per-bucket values for the requested period.
+    Query power consumption (kWh) for one device over any date range.
+    Returns the total and per-bucket values without changing the sensor period.
   fields:
     device_id:
       name: Device ID
@@ -38,3 +38,23 @@ get_power_consumption:
             - day
             - month
             - year
+
+set_power_consumption_period:
+  name: Set power consumption period
+  description: >-
+    Set the date range used by all Power Consumption sensors, then refresh them.
+  fields:
+    start_date:
+      name: Start date
+      description: First day of the period (YYYY-MM-DD).
+      required: true
+      example: "2026-06-01"
+      selector:
+        date:
+    end_date:
+      name: End date
+      description: Last day of the period (YYYY-MM-DD).
+      required: true
+      example: "2026-06-26"
+      selector:
+        date:

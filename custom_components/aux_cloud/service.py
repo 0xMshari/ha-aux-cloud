@@ -17,8 +17,10 @@ from .api.aux_cloud import (
     resolve_stats_report_type,
 )
 from .const import DOMAIN
+from .power_consumption import async_update_power_period
 
 SERVICE_GET_POWER_CONSUMPTION = "get_power_consumption"
+SERVICE_SET_POWER_CONSUMPTION_PERIOD = "set_power_consumption_period"
 
 GET_POWER_CONSUMPTION_SCHEMA = vol.Schema(
     {
@@ -26,6 +28,13 @@ GET_POWER_CONSUMPTION_SCHEMA = vol.Schema(
         vol.Required("start_date"): cv.string,
         vol.Required("end_date"): cv.string,
         vol.Optional("report_type"): vol.In(["day", "month", "year"]),
+    }
+)
+
+SET_POWER_CONSUMPTION_PERIOD_SCHEMA = vol.Schema(
+    {
+        vol.Required("start_date"): cv.string,
+        vol.Required("end_date"): cv.string,
     }
 )
 
@@ -39,8 +48,16 @@ def _find_device_and_api(hass: HomeAssistant, device_id: str):
             continue
         device = coordinator.get_device_by_endpoint_id(device_id)
         if device:
-            return device, api
-    return None, None
+            return device, api, data.get("config_entry")
+    return None, None, None
+
+
+def _get_config_entry(hass: HomeAssistant):
+    """Return the active config entry when only one is loaded."""
+    entries = hass.data.get(DOMAIN, {})
+    if len(entries) != 1:
+        return None
+    return next(iter(entries.values())).get("config_entry")
 
 
 @callback
@@ -55,7 +72,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         end_date = date.fromisoformat(call.data["end_date"])
         report_type: ReportType | None = call.data.get("report_type")
 
-        device, api = _find_device_and_api(hass, device_id)
+        device, api, _entry = _find_device_and_api(hass, device_id)
         if not device or not api:
             raise ServiceValidationError(f"Device {device_id} not found")
 
@@ -80,10 +97,34 @@ def async_register_services(hass: HomeAssistant) -> None:
             "values": values,
         }
 
+    async def handle_set_power_consumption_period(call: ServiceCall):
+        start_date = date.fromisoformat(call.data["start_date"])
+        end_date = date.fromisoformat(call.data["end_date"])
+        entry = _get_config_entry(hass)
+        if entry is None:
+            raise ServiceValidationError(
+                "Could not determine config entry for power consumption period"
+            )
+
+        await async_update_power_period(hass, entry, start_date, end_date)
+
+        return {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "report_type": resolve_stats_report_type(start_date, end_date),
+        }
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_GET_POWER_CONSUMPTION,
         handle_get_power_consumption,
         schema=GET_POWER_CONSUMPTION_SCHEMA,
+        supports_response=True,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_POWER_CONSUMPTION_PERIOD,
+        handle_set_power_consumption_period,
+        schema=SET_POWER_CONSUMPTION_PERIOD_SCHEMA,
         supports_response=True,
     )

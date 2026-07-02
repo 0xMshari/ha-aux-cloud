@@ -19,6 +19,10 @@ from .const import (
     PLATFORMS,
     CONF_SELECTED_DEVICES,
 )
+from .power_consumption import (
+    AuxCloudPowerCoordinator,
+    async_remove_stale_power_entities,
+)
 from .service import async_register_services
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
@@ -168,6 +172,14 @@ class AuxCloudCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error updating AUX Cloud data: {e}") from e
 
 
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate config entries and drop legacy power consumption entities."""
+    if config_entry.version < 2:
+        async_remove_stale_power_entities(hass, config_entry)
+        hass.config_entries.async_update_entry(config_entry, version=2)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up AUX Cloud from a config entry."""
     region = entry.data.get(CONF_REGION, "eu")
@@ -195,10 +207,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Perform an initial update
     await coordinator.async_config_entry_first_refresh()
 
+    async_remove_stale_power_entities(hass, entry)
+
+    power_coordinator = AuxCloudPowerCoordinator(hass, api, coordinator, entry)
+    await power_coordinator.async_config_entry_first_refresh()
+
     # Store the coordinator for platform use
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
+        "power_coordinator": power_coordinator,
         "api": api,
+        "config_entry": entry,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -211,6 +230,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload the config entry and platforms."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        hass.data.pop(DOMAIN)
+    if unload_ok and DOMAIN in hass.data:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        if not hass.data[DOMAIN]:
+            hass.data.pop(DOMAIN)
     return unload_ok

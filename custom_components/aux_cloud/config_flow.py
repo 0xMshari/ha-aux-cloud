@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 class AuxCloudFlowHandler(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for AUX Cloud."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize the AUX Cloud flow."""
