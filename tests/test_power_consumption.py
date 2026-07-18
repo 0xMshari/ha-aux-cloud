@@ -84,3 +84,7 @@ def test_sensor_last_reset_follows_period_start():
     assert sensor.native_value == 1.5
     assert sensor.available is True
     assert sensor.last_reset.date() == date(2026, 6, 1)
+
+    coordinator.data["period"]["start_date"] = "2026-07-01"
+    sensor._sync_last_reset()
+    assert sensor.last_reset.date() == date(2026, 7, 1)

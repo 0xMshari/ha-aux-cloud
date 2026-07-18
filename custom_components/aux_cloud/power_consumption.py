@@ -166,7 +166,13 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
 
 
 class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
-    """Energy consumption for a configurable date range."""
+    """Energy consumption for a configurable date range.
+
+    Matches Home Assistant Energy expectations from core:
+    - device_class=energy, unit=kWh, state_class=total
+    - last_reset at period start (required only with state_class=total)
+    - unit_class becomes \"energy\" so the Energy device picker can list it
+    """
 
     def __init__(
         self,
@@ -184,6 +190,28 @@ class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
             f"{DOMAIN}_{self._device_id.lstrip('0')}_{POWER_CONSUMPTION_KEY}"
         )
         self.entity_id = f"sensor.{self._attr_unique_id}"
+        self._sync_last_reset()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        # Same pattern as homeassistant/components/iotawatt/sensor.py:
+        # set _attr_last_reset before writing state.
+        self._sync_last_reset()
+        super()._handle_coordinator_update()
+
+    def _sync_last_reset(self) -> None:
+        """Set last_reset to the configured period start (HA Energy standard)."""
+        if not self.coordinator.data:
+            self._attr_last_reset = None
+            return
+        start_raw = self.coordinator.data.get("period", {}).get("start_date")
+        start = _parse_config_date(start_raw)
+        if start is None:
+            self._attr_last_reset = None
+            return
+        tzinfo = dt_util.get_default_time_zone() or timezone.utc
+        self._attr_last_reset = datetime.combine(start, time.min, tzinfo=tzinfo)
 
     @property
     def _device(self):
@@ -208,12 +236,13 @@ class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True when the device is present and a query result exists."""
+        """Return True when the device is present and a numeric total exists."""
         if self._device is None:
             return False
         if not self.coordinator.last_update_success:
             return False
-        return self._consumption_record is not None
+        record = self._consumption_record
+        return record is not None and record.get("total_kwh") is not None
 
     @property
     def _consumption_record(self) -> dict | None:
@@ -229,19 +258,6 @@ class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
         if not record:
             return None
         return record.get("total_kwh")
-
-    @property
-    def last_reset(self) -> datetime | None:
-        """Return the start of the configured period for Energy dashboard stats."""
-        if not self.coordinator.data:
-            return None
-        start_raw = self.coordinator.data.get("period", {}).get("start_date")
-        start = _parse_config_date(start_raw)
-        if start is None:
-            return None
-
-        tzinfo = dt_util.get_default_time_zone() or timezone.utc
-        return datetime.combine(start, time.min, tzinfo=tzinfo)
 
     @property
     def extra_state_attributes(self):
