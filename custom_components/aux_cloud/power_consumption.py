@@ -1,8 +1,8 @@
-"""Cumulative year-to-date energy consumption coordinator and sensor."""
+"""Period energy consumption with TOTAL + last_reset for HA Energy."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -15,17 +15,22 @@ from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .api.aux_cloud import (
+    ReportType,
     aggregate_device_stats_by_day,
     parse_device_stats_latest,
     parse_device_stats_total,
     parse_device_stats_values,
-    resolve_stats_report_type,
 )
 from .api.const import AuxProducts
 from .const import (
+    CONF_ENERGY_PERIOD,
     DOMAIN,
+    ENERGY_PERIOD_DAY,
+    ENERGY_PERIOD_MONTH,
+    ENERGY_PERIOD_YEAR,
     MANUFACTURER,
     POWER_CONSUMPTION_KEY,
     POWER_UPDATE_INTERVAL,
@@ -39,21 +44,46 @@ POWER_SENSOR_DESCRIPTION = SensorEntityDescription(
     translation_key="power_consumption",
     device_class=SensorDeviceClass.ENERGY,
     native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-    # Cumulative YTD meter: value only grows within the year so HA Energy /
-    # Vulpo can take day-over-day deltas without inventing negatives at
-    # midnight (the failure mode of a resetting "today only" period total).
-    state_class=SensorStateClass.TOTAL_INCREASING,
+    # TOTAL + last_reset: the period total intentionally resets (daily /
+    # monthly / yearly). HA Energy uses last_reset as the meter cycle
+    # boundary so the drop is not charted as negative consumption.
+    state_class=SensorStateClass.TOTAL,
 )
 
 
-def get_meter_period(today: date | None = None) -> tuple[date, date]:
-    """Return Jan 1 of the current year through today (inclusive)."""
+def get_energy_period(entry: ConfigEntry | None = None) -> ReportType:
+    """Return configured energy period (day / month / year)."""
+    if entry is None:
+        return ENERGY_PERIOD_DAY
+    value = entry.options.get(CONF_ENERGY_PERIOD) or entry.data.get(
+        CONF_ENERGY_PERIOD, ENERGY_PERIOD_DAY
+    )
+    if value in (ENERGY_PERIOD_DAY, ENERGY_PERIOD_MONTH, ENERGY_PERIOD_YEAR):
+        return value  # type: ignore[return-value]
+    return ENERGY_PERIOD_DAY
+
+
+def get_meter_period(
+    today: date | None = None,
+    *,
+    period: ReportType = ENERGY_PERIOD_DAY,
+) -> tuple[date, date]:
+    """Return inclusive start/end dates for the active energy cycle."""
     today = today or date.today()
-    return date(today.year, 1, 1), today
+    if period == ENERGY_PERIOD_YEAR:
+        return date(today.year, 1, 1), today
+    if period == ENERGY_PERIOD_MONTH:
+        return date(today.year, today.month, 1), today
+    return today, today
+
+
+def last_reset_for_period(start: date) -> datetime:
+    """Return timezone-aware local midnight at the cycle start."""
+    return dt_util.as_local(datetime.combine(start, datetime.min.time()))
 
 
 class AuxCloudPowerCoordinator(DataUpdateCoordinator):
-    """Fetch cumulative year-to-date energy for supported devices."""
+    """Fetch energy for the configured day/month/year cycle."""
 
     def __init__(
         self,
@@ -72,37 +102,33 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
         self.api = api
         self.device_coordinator = device_coordinator
         self.entry = entry
-        # endpoint_id -> (meter_start_iso, total_kwh). Never allow the YTD
-        # meter to drop while the year window is unchanged — including when
-        # "today" (end date) rolls at midnight. Keying on end_date used to
-        # reset the guard every night and re-introduce Energy negatives.
+        # endpoint_id -> (cycle_start_iso, total_kwh). Refuse mid-cycle drops
+        # from sparse cloud under-counts; allow a drop when the cycle rolls.
         self._last_period_totals: dict[str, tuple[str, float]] = {}
 
     def _stabilize_total(
-        self, endpoint_id: str, start_iso: str, end_iso: str, total_kwh: float | None
+        self, endpoint_id: str, start_iso: str, total_kwh: float | None
     ) -> float | None:
-        """Keep YTD totals from decreasing within the same meter-start year."""
+        """Keep totals from decreasing within the same reset cycle."""
         if total_kwh is None:
             return None
         previous = self._last_period_totals.get(endpoint_id)
         if previous is not None and previous[0] == start_iso and total_kwh < previous[1]:
             _LOGGER.debug(
-                "Ignoring transient energy drop for %s (%s → %s) within meter %s "
-                "(end=%s)",
+                "Ignoring transient energy drop for %s (%s → %s) within cycle %s",
                 endpoint_id,
                 previous[1],
                 total_kwh,
                 start_iso,
-                end_iso,
             )
             total_kwh = previous[1]
         self._last_period_totals[endpoint_id] = (start_iso, total_kwh)
         return total_kwh
 
     async def _async_update_data(self):
-        """Fetch YTD consumption totals for all supported devices."""
-        start_date, end_date = get_meter_period()
-        report_type = resolve_stats_report_type(start_date, end_date)
+        """Fetch consumption for the active day/month/year cycle."""
+        report_type = get_energy_period(self.entry)
+        start_date, end_date = get_meter_period(period=report_type)
         start_iso = start_date.isoformat()
         end_iso = end_date.isoformat()
         devices = (
@@ -123,6 +149,8 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
                 continue
 
             try:
+                # Force report_type to match the cycle so AUX buckets align
+                # with last_reset (day / month / year).
                 raw = await self.api.get_device_stats_for_period(
                     device,
                     start_date,
@@ -135,9 +163,7 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
                 total_kwh = parse_device_stats_total(raw)
                 if total_kwh is None and daily:
                     total_kwh = sum(daily.values())
-                total_kwh = self._stabilize_total(
-                    endpoint_id, start_iso, end_iso, total_kwh
-                )
+                total_kwh = self._stabilize_total(endpoint_id, start_iso, total_kwh)
                 consumption[endpoint_id] = {
                     "total_kwh": 0.0 if total_kwh is None else total_kwh,
                     "values": values,
@@ -173,7 +199,11 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
 
 
 class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
-    """Cumulative year-to-date energy consumption (kWh)."""
+    """Energy for the active day / month / year cycle (kWh).
+
+    Exposes device_class=energy with state_class=total and last_reset at the
+    cycle boundary so HA Energy treats rollovers as meter resets.
+    """
 
     def __init__(
         self,
@@ -230,15 +260,27 @@ class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return cumulative YTD kWh."""
+        """Return kWh for the active cycle (resets with last_reset)."""
         record = self._consumption_record
         if not record:
             return None
         return record.get("total_kwh")
 
     @property
+    def last_reset(self) -> datetime | None:
+        """Return the start of the active day/month/year cycle."""
+        period = (self.coordinator.data or {}).get("period", {})
+        start = period.get("start_date")
+        if not start:
+            return None
+        try:
+            return last_reset_for_period(date.fromisoformat(str(start)[:10]))
+        except ValueError:
+            return None
+
+    @property
     def extra_state_attributes(self):
-        """Return the meter window and breakdown metadata."""
+        """Return the cycle window and breakdown metadata."""
         period = (self.coordinator.data or {}).get("period", {})
         record = self._consumption_record or {}
         return {

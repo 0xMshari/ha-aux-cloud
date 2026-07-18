@@ -68,6 +68,11 @@ PLATFORMS = [
 
 MAX_FAILED_POLLS = 5
 
-# Cumulative energy meter (year-to-date)
+# Period energy meter (day / month / year) with TOTAL + last_reset
 POWER_CONSUMPTION_KEY = "power_consumption"
 POWER_UPDATE_INTERVAL = timedelta(minutes=15)
+CONF_ENERGY_PERIOD = "energy_period"
+ENERGY_PERIOD_DAY = "day"
+ENERGY_PERIOD_MONTH = "month"
+ENERGY_PERIOD_YEAR = "year"
+ENERGY_PERIODS = (ENERGY_PERIOD_DAY, ENERGY_PERIOD_MONTH, ENERGY_PERIOD_YEAR)

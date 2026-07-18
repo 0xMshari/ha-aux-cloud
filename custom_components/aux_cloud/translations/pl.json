@@ -46,7 +46,8 @@
         "title": "Aktualizuj urządzenia AUX Cloud",
         "description": "Wybierz, które urządzenia chcesz monitorować i kontrolować za pomocą Home Assistant.",
         "data": {
-          "selected_devices": "Wybierz urządzenia"
+          "selected_devices": "Wybierz urządzenia",
+          "energy_period": "Okres licznika energii (reset dzienny / miesięczny / roczny)"
         }
       }
     }
