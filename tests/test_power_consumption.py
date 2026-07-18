@@ -1,11 +1,11 @@
-"""Tests for energy consumption period helpers and sensor metadata."""
+"""Tests for energy/power sensors used by HA Energy and apps like Vulpo."""
 
 from datetime import date, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import UnitOfEnergy, UnitOfPower
 
 from custom_components.aux_cloud.power_consumption import (
     POWER_SENSOR_DESCRIPTION,
@@ -13,18 +13,30 @@ from custom_components.aux_cloud.power_consumption import (
     _parse_config_date,
     get_power_period,
 )
+from custom_components.aux_cloud.sensor import SENSORS
+from custom_components.aux_cloud.api.const import AC_TENELEC
 from custom_components.aux_cloud.service import _coerce_service_date
 
 
-def test_power_sensor_matches_energy_dashboard_standard():
+def test_energy_sensor_matches_energy_dashboard_standard():
     """Energy sensors must expose HA Energy-compatible attributes."""
     assert POWER_SENSOR_DESCRIPTION.device_class == SensorDeviceClass.ENERGY
     assert (
         POWER_SENSOR_DESCRIPTION.native_unit_of_measurement
         == UnitOfEnergy.KILO_WATT_HOUR
     )
-    assert POWER_SENSOR_DESCRIPTION.state_class == SensorStateClass.TOTAL
+    assert POWER_SENSOR_DESCRIPTION.state_class == SensorStateClass.TOTAL_INCREASING
     assert POWER_SENSOR_DESCRIPTION.name == "Energy Consumption"
+
+
+def test_live_power_sensor_matches_vulpo_power_card_standard():
+    """Vulpo Power Consumption cards filter device_class=power in Watts."""
+    power = SENSORS[AC_TENELEC]["description"]
+    assert power.device_class == SensorDeviceClass.POWER
+    assert power.native_unit_of_measurement == UnitOfPower.WATT
+    assert power.state_class == SensorStateClass.MEASUREMENT
+    assert power.key == "power"
+    assert power.name == "Power"
 
 
 def test_parse_config_date_accepts_common_shapes():
@@ -61,8 +73,8 @@ def test_get_power_period_defaults_to_today():
     assert get_power_period(entry) == (today, today)
 
 
-def test_sensor_last_reset_follows_period_start():
-    """last_reset must track the configured period for Energy statistics."""
+def test_energy_sensor_exposes_period_and_value():
+    """Energy sensor should report the period total when data is present."""
     coordinator = MagicMock()
     coordinator.data = {
         "consumption": {"device1": {"total_kwh": 1.5, "data_points": 1}},
@@ -83,8 +95,4 @@ def test_sensor_last_reset_follows_period_start():
     sensor = AuxCloudPowerSensor(coordinator, device_coordinator, "device1")
     assert sensor.native_value == 1.5
     assert sensor.available is True
-    assert sensor.last_reset.date() == date(2026, 6, 1)
-
-    coordinator.data["period"]["start_date"] = "2026-07-01"
-    sensor._sync_last_reset()
-    assert sensor.last_reset.date() == date(2026, 7, 1)
+    assert sensor.extra_state_attributes["start_date"] == "2026-06-01"
