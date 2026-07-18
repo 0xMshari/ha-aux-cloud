@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -19,7 +19,6 @@ from homeassistant.helpers.entity_registry import (
     async_get as async_get_entity_registry,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
-from homeassistant.util import dt as dt_util
 
 from .api.aux_cloud import (
     parse_device_stats_total,
@@ -45,9 +44,10 @@ POWER_SENSOR_DESCRIPTION = SensorEntityDescription(
     translation_key="power_consumption",
     device_class=SensorDeviceClass.ENERGY,
     native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-    # Period total for a configurable date range. last_reset tracks the period
-    # start so Home Assistant Energy can include the sensor.
-    state_class=SensorStateClass.TOTAL,
+    # total_increasing matches HA Energy / Vulpo expectations for a meter that
+    # resets (e.g. daily period). Decreases are treated as a new meter cycle,
+    # which avoids the large negative kWh spikes seen with plain total.
+    state_class=SensorStateClass.TOTAL_INCREASING,
 )
 
 
@@ -168,10 +168,9 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
 class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
     """Energy consumption for a configurable date range.
 
-    Matches Home Assistant Energy expectations from core:
-    - device_class=energy, unit=kWh, state_class=total
-    - last_reset at period start (required only with state_class=total)
-    - unit_class becomes \"energy\" so the Energy device picker can list it
+    Matches Home Assistant Energy / Vulpo expectations from core:
+    - device_class=energy, unit=kWh, state_class=total_increasing
+    - unit_class becomes \"energy\" so Energy pickers can list it
     """
 
     def __init__(
@@ -190,28 +189,6 @@ class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
             f"{DOMAIN}_{self._device_id.lstrip('0')}_{POWER_CONSUMPTION_KEY}"
         )
         self.entity_id = f"sensor.{self._attr_unique_id}"
-        self._sync_last_reset()
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
-        # Same pattern as homeassistant/components/iotawatt/sensor.py:
-        # set _attr_last_reset before writing state.
-        self._sync_last_reset()
-        super()._handle_coordinator_update()
-
-    def _sync_last_reset(self) -> None:
-        """Set last_reset to the configured period start (HA Energy standard)."""
-        if not self.coordinator.data:
-            self._attr_last_reset = None
-            return
-        start_raw = self.coordinator.data.get("period", {}).get("start_date")
-        start = _parse_config_date(start_raw)
-        if start is None:
-            self._attr_last_reset = None
-            return
-        tzinfo = dt_util.get_default_time_zone() or timezone.utc
-        self._attr_last_reset = datetime.combine(start, time.min, tzinfo=tzinfo)
 
     @property
     def _device(self):
