@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import voluptuous as vol
 
@@ -22,19 +22,36 @@ from .power_consumption import async_update_power_period
 SERVICE_GET_POWER_CONSUMPTION = "get_power_consumption"
 SERVICE_SET_POWER_CONSUMPTION_PERIOD = "set_power_consumption_period"
 
+
+def _coerce_service_date(value) -> date:
+    """Accept date, datetime, or ISO date/datetime strings from service calls."""
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError as err:
+            raise vol.Invalid(f"Invalid date: {value}") from err
+    raise vol.Invalid(f"Expected a date, got {type(value).__name__}")
+
+
+DATE_FIELD = _coerce_service_date
+
 GET_POWER_CONSUMPTION_SCHEMA = vol.Schema(
     {
         vol.Required("device_id"): cv.string,
-        vol.Required("start_date"): cv.string,
-        vol.Required("end_date"): cv.string,
+        vol.Required("start_date"): DATE_FIELD,
+        vol.Required("end_date"): DATE_FIELD,
         vol.Optional("report_type"): vol.In(["day", "month", "year"]),
     }
 )
 
 SET_POWER_CONSUMPTION_PERIOD_SCHEMA = vol.Schema(
     {
-        vol.Required("start_date"): cv.string,
-        vol.Required("end_date"): cv.string,
+        vol.Required("start_date"): DATE_FIELD,
+        vol.Required("end_date"): DATE_FIELD,
     }
 )
 
@@ -68,9 +85,12 @@ def async_register_services(hass: HomeAssistant) -> None:
 
     async def handle_get_power_consumption(call: ServiceCall):
         device_id = call.data["device_id"]
-        start_date = date.fromisoformat(call.data["start_date"])
-        end_date = date.fromisoformat(call.data["end_date"])
+        start_date = call.data["start_date"]
+        end_date = call.data["end_date"]
         report_type: ReportType | None = call.data.get("report_type")
+
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
 
         device, api, _entry = _find_device_and_api(hass, device_id)
         if not device or not api:
@@ -98,8 +118,8 @@ def async_register_services(hass: HomeAssistant) -> None:
         }
 
     async def handle_set_power_consumption_period(call: ServiceCall):
-        start_date = date.fromisoformat(call.data["start_date"])
-        end_date = date.fromisoformat(call.data["end_date"])
+        start_date = call.data["start_date"]
+        end_date = call.data["end_date"]
         entry = _get_config_entry(hass)
         if entry is None:
             raise ServiceValidationError(
@@ -107,6 +127,8 @@ def async_register_services(hass: HomeAssistant) -> None:
             )
 
         await async_update_power_period(hass, entry, start_date, end_date)
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
 
         return {
             "start_date": start_date.isoformat(),

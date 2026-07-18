@@ -101,11 +101,30 @@ def _build_stats_date_range(
 
 
 def build_stats_date_range_from_dates(
-    start: date, end: date
+    start: date,
+    end: date,
+    report_type: ReportType = "day",
 ) -> tuple[str, str]:
-    """Build start/end timestamps for an arbitrary date range."""
+    """Build start/end timestamps for an arbitrary date range.
+
+    AUX cloud expects the day component ``00`` for month/year report starts.
+    Day reports use real calendar dates so any inclusive range is supported.
+    """
     if end < start:
         start, end = end, start
+
+    if report_type == "year":
+        return (
+            f"{start.year}-01-00_00:00:00",
+            f"{end.year}-12-31_23:59:59",
+        )
+
+    if report_type == "month":
+        last_day = monthrange(end.year, end.month)[1]
+        return (
+            f"{start.year}-{start.month:02d}-00_00:00:00",
+            f"{end.year}-{end.month:02d}-{last_day:02d}_23:59:59",
+        )
 
     return (
         f"{start.year}-{start.month:02d}-{start.day:02d}_00:00:00",
@@ -114,7 +133,11 @@ def build_stats_date_range_from_dates(
 
 
 def resolve_stats_report_type(start: date, end: date) -> ReportType:
-    """Choose report granularity based on how long the period is."""
+    """Choose report granularity based on how long the period is.
+
+    Prefer day buckets for short/custom ranges so arbitrary start/end dates
+    are preserved. Longer spans use month/year reports with AUX date quirks.
+    """
     if end < start:
         start, end = end, start
 
@@ -846,11 +869,13 @@ class AuxCloudAPI:
         if start_date is not None or end_date is not None:
             period_start = start_date or end_date or date.today()
             period_end = end_date or start_date or date.today()
+            if end_date is not None and start_date is not None and end_date < start_date:
+                period_start, period_end = period_end, period_start
             if report_type is None:
                 report_type = resolve_stats_report_type(period_start, period_end)
             if start is None or end is None:
                 range_start, range_end = build_stats_date_range_from_dates(
-                    period_start, period_end
+                    period_start, period_end, report_type
                 )
                 start = start or range_start
                 end = end or range_end
