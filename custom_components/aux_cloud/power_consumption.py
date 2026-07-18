@@ -72,33 +72,31 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
         self.api = api
         self.device_coordinator = device_coordinator
         self.entry = entry
-        # endpoint_id -> (start_iso, end_iso, total_kwh). Ignore transient
-        # cloud under-counts that would drop total_increasing mid-window.
-        self._last_period_totals: dict[str, tuple[str, str, float]] = {}
+        # endpoint_id -> (meter_start_iso, total_kwh). Never allow the YTD
+        # meter to drop while the year window is unchanged — including when
+        # "today" (end date) rolls at midnight. Keying on end_date used to
+        # reset the guard every night and re-introduce Energy negatives.
+        self._last_period_totals: dict[str, tuple[str, float]] = {}
 
     def _stabilize_total(
         self, endpoint_id: str, start_iso: str, end_iso: str, total_kwh: float | None
     ) -> float | None:
-        """Keep period totals from decreasing while the date range is unchanged."""
+        """Keep YTD totals from decreasing within the same meter-start year."""
         if total_kwh is None:
             return None
         previous = self._last_period_totals.get(endpoint_id)
-        if (
-            previous is not None
-            and previous[0] == start_iso
-            and previous[1] == end_iso
-            and total_kwh < previous[2]
-        ):
+        if previous is not None and previous[0] == start_iso and total_kwh < previous[1]:
             _LOGGER.debug(
-                "Ignoring transient energy drop for %s (%s → %s) within %s..%s",
+                "Ignoring transient energy drop for %s (%s → %s) within meter %s "
+                "(end=%s)",
                 endpoint_id,
-                previous[2],
+                previous[1],
                 total_kwh,
                 start_iso,
                 end_iso,
             )
-            total_kwh = previous[2]
-        self._last_period_totals[endpoint_id] = (start_iso, end_iso, total_kwh)
+            total_kwh = previous[1]
+        self._last_period_totals[endpoint_id] = (start_iso, total_kwh)
         return total_kwh
 
     async def _async_update_data(self):
