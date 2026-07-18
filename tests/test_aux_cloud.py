@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from custom_components.aux_cloud.api.aux_cloud import (
+    AuxApiError,
     AuxCloudAPI,
     API_SERVER_URL_EU,
     API_SERVER_URL_USA,
@@ -265,6 +266,47 @@ class TestAuxCloudAPI:
         assert call_kwargs["data"]["device"][0]["start"] == "2026-01-00_00:00:00"
         assert call_kwargs["data"]["device"][0]["end"] == "2026-06-30_23:59:59"
         assert call_kwargs["data"]["device"][0]["reportType"] == "month"
+
+    @pytest.mark.asyncio
+    async def test_get_special_device_params_one_request_per_param(self, aux_api):
+        """Special params must be fetched one at a time and merged."""
+        device = {"endpointId": "did"}
+
+        async def fake_get_device_params(dev, params=None):
+            if params == ["mode"]:
+                return {"mode": 2}
+            if params == ["tenelec"]:
+                return {"tenelec": 1250}
+            raise AssertionError(f"Unexpected params: {params}")
+
+        with patch.object(
+            aux_api, "get_device_params", side_effect=fake_get_device_params
+        ) as mock_get:
+            merged = await aux_api.get_special_device_params(
+                device, ["mode", "tenelec"]
+            )
+
+        assert merged == {"mode": 2, "tenelec": 1250}
+        assert mock_get.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_special_device_params_tolerates_failures(self, aux_api):
+        """One unsupported special param must not break the others."""
+        device = {"endpointId": "did"}
+
+        async def fake_get_device_params(dev, params=None):
+            if params == ["tenelec"]:
+                raise AuxApiError("param not supported")
+            return {"mode": 1}
+
+        with patch.object(
+            aux_api, "get_device_params", side_effect=fake_get_device_params
+        ):
+            merged = await aux_api.get_special_device_params(
+                device, ["mode", "tenelec"]
+            )
+
+        assert merged == {"mode": 1}
 
     def test_parse_device_stats_total_from_rows(self):
         """Test summing energy values from stats rows."""

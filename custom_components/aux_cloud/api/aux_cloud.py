@@ -548,16 +548,14 @@ class AuxCloudAPI:
                     )
                     dev_special_params_task = None
 
-                if AuxProducts.get_special_params_list(
+                special_params_list = AuxProducts.get_special_params_list(
                     dev["productId"]
-                ) is not None and not AuxProducts.is_v3_heat_pump(dev):
+                )
+                if special_params_list is not None and not AuxProducts.is_v3_heat_pump(
+                    dev
+                ):
                     dev_special_params_task = asyncio.create_task(
-                        self.get_device_params(
-                            dev,
-                            params=AuxProducts.get_special_params_list(
-                                dev["productId"]
-                            ),
-                        )
+                        self.get_special_device_params(dev, special_params_list)
                     )
 
                 param_tasks.append([dev, dev_params_task, dev_special_params_task])
@@ -823,6 +821,35 @@ class AuxCloudAPI:
         if params is None:
             params = []
         return await self._act_device_params(device, "get", params)
+
+    async def get_special_device_params(
+        self, device: dict, params: list[str]
+    ) -> dict:
+        """Fetch special params with one request per param.
+
+        The sdkcontrol GET endpoint only reliably answers the single-param
+        shape (params=[x] with a dummy vals entry). Querying several special
+        params in one request fails, and a single unsupported param (e.g.
+        tenelec on some units) would otherwise take down the whole batch.
+        """
+        results = await asyncio.gather(
+            *(self.get_device_params(device, params=[param]) for param in params),
+            return_exceptions=True,
+        )
+
+        merged: dict = {}
+        for param, result in zip(params, results):
+            if isinstance(result, BaseException):
+                _LOGGER.debug(
+                    "Special param %s unavailable for %s: %s",
+                    param,
+                    device["endpointId"],
+                    result,
+                )
+                continue
+            if isinstance(result, dict):
+                merged.update(result)
+        return merged
 
     async def set_device_params(self, device: dict, values: dict):
         """
