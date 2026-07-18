@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import UnitOfPower, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -15,6 +17,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api.const import (
     AC_TEMPERATURE_AMBIENT,
     AC_TEMPERATURE_TARGET,
+    AC_TENELEC,
     AUX_ERROR_FLAG,
     AuxProducts,
     HP_HOT_WATER_TANK_TEMPERATURE,
@@ -109,6 +112,26 @@ SENSORS: dict[str, dict[str, any]] = {
         ),
         "get_fn": lambda d: d.get("params", {}).get(AUX_ERROR_FLAG, None),
     },
+    # Live power (W). Required by apps like Vulpo that filter device_class=power.
+    # Kept separate from the kWh Energy Consumption sensor.
+    AC_TENELEC: {
+        "type": "power",
+        "param": AC_TENELEC,
+        "description": SensorEntityDescription(
+            key="power",
+            name="Power",
+            icon="mdi:flash",
+            translation_key="power",
+            device_class=SensorDeviceClass.POWER,
+            native_unit_of_measurement=UnitOfPower.WATT,
+            state_class=SensorStateClass.MEASUREMENT,
+        ),
+        "get_fn": lambda d: (
+            d.get("params", {}).get(AC_TENELEC) / 10
+            if d.get("params", {}).get(AC_TENELEC) is not None
+            else None
+        ),
+    },
 }
 
 
@@ -141,11 +164,12 @@ async def async_setup_entry(
             )
 
         for entity in SENSORS.values():
+            param_key = entity.get("param") or entity["description"].key
             if "productId" in device and (
-                (supported_params and entity["description"].key in supported_params)
+                (supported_params and param_key in supported_params)
                 or (
                     supported_special_params
-                    and entity["description"].key in supported_special_params
+                    and param_key in supported_special_params
                 )
             ):
                 sensor = AuxCloudSensor(
