@@ -1,4 +1,6 @@
 import logging
+from datetime import timedelta
+
 from homeassistant.const import Platform
 from homeassistant.components.climate import (
     HVACMode,
@@ -65,3 +67,7 @@ PLATFORMS = [
 ]
 
 MAX_FAILED_POLLS = 5
+
+# Cumulative energy meter (year-to-date)
+POWER_CONSUMPTION_KEY = "power_consumption"
+POWER_UPDATE_INTERVAL = timedelta(minutes=15)

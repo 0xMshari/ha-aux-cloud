@@ -64,6 +64,12 @@
       },
       "ac_temperature": {
         "name": "AC Temperature"
+      },
+      "power_consumption": {
+        "name": "Energy Consumption"
+      },
+      "power": {
+        "name": "Power"
       }
     },
     "water_heater": {

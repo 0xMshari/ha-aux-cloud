@@ -15,6 +15,10 @@ AC_POWER = "pwr"
 AC_POWER_OFF = {AC_POWER: 0}
 AC_POWER_ON = {AC_POWER: 1}
 
+# Live instantaneous power param (Watts ≈ value / 10). Must be fetched as a
+# special param; often missing even when historical energy stats work.
+AC_TENELEC = "tenelec"
+
 AC_TEMPERATURE_TARGET = "temp"
 AC_TEMPERATURE_AMBIENT = "envtemp"
 
@@ -165,10 +169,12 @@ class AuxProducts:
         "sleepdiy",
         "ac_errcode1",
         "tempunit",
-        "tenelec",  # Unknown, might be available when the device is in specific state
+        AC_TENELEC,
     ]
 
-    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL]
+    # mode and tenelec are not returned by the empty-params query and must be
+    # fetched explicitly (one request per param — batching fails).
+    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL, AC_TENELEC]
 
     HP_PARAMS = [
         "ac_errcode1",
@@ -228,6 +234,13 @@ class AuxProducts:
         if product_id in AuxProducts.DeviceType.HEAT_PUMP:
             return AuxProducts.HP_SPECIAL_PARAMS
         return None
+
+    @staticmethod
+    def supports_energy_stats(product_id: str) -> bool:
+        """Return True if the device type exposes cloud energy statistics."""
+        return product_id in AuxProducts.DeviceType.AC_GENERIC or (
+            product_id in AuxProducts.DeviceType.HEAT_PUMP
+        )
 
     @staticmethod
     def is_v3_heat_pump(device: dict) -> bool:

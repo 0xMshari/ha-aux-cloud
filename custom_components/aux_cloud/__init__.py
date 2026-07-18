@@ -20,6 +20,8 @@ from .const import (
     CONF_SELECTED_DEVICES,
     MAX_FAILED_POLLS,
 )
+from .power_consumption import AuxCloudPowerCoordinator
+from .service import async_register_services
 from .util import DeviceStateHelper
 
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
@@ -217,11 +219,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Perform an initial update
     await coordinator.async_config_entry_first_refresh()
 
+    power_coordinator = AuxCloudPowerCoordinator(hass, api, coordinator, entry)
+    await power_coordinator.async_config_entry_first_refresh()
+
     # Store the coordinator for platform use
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "coordinator": coordinator,
+        "power_coordinator": power_coordinator,
         "api": api,
     }
+
+    async_register_services(hass)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

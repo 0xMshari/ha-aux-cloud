@@ -1,0 +1,37 @@
+get_power_consumption:
+  name: Get energy consumption
+  description: >
+    Query energy consumption (kWh) for one device over any date range.
+    Does not change the cumulative year-to-date Energy Consumption sensor.
+  fields:
+    device_id:
+      name: Device ID
+      description: Device endpointId (did)
+      required: true
+      example: "00000000000000000000907abe0f30c9"
+      selector:
+        text:
+    start_date:
+      name: Start date
+      description: Inclusive start date (YYYY-MM-DD)
+      required: true
+      example: "2026-07-01"
+      selector:
+        date:
+    end_date:
+      name: End date
+      description: Inclusive end date (YYYY-MM-DD)
+      required: true
+      example: "2026-07-18"
+      selector:
+        date:
+    report_type:
+      name: Report type
+      description: Optional granularity (day / month / year). Auto-selected when omitted.
+      required: false
+      selector:
+        select:
+          options:
+            - "day"
+            - "month"
+            - "year"
