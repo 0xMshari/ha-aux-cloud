@@ -46,8 +46,7 @@
         "title": "Update AUX Cloud Devices",
         "description": "Select which devices you want to monitor and control with Home Assistant.",
         "data": {
-          "selected_devices": "Select Devices",
-          "energy_period": "Energy meter period (resets daily / monthly / yearly)"
+          "selected_devices": "Select Devices"
         }
       }
     }
@@ -68,6 +67,15 @@
       },
       "power_consumption": {
         "name": "Energy Consumption"
+      },
+      "energy_consumption_day": {
+        "name": "Energy Consumption Day"
+      },
+      "energy_consumption_month": {
+        "name": "Energy Consumption Month"
+      },
+      "energy_consumption_year": {
+        "name": "Energy Consumption Year"
       },
       "power": {
         "name": "Power"

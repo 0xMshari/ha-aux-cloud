@@ -12,15 +12,7 @@ from homeassistant.helpers.device_registry import async_get as async_get_device_
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
 from .api.aux_cloud import AuxCloudAPI
-from .const import (
-    CONF_ENERGY_PERIOD,
-    CONF_FAMILIES,
-    CONF_SELECTED_DEVICES,
-    DATA_AUX_CLOUD_CONFIG,
-    DOMAIN,
-    ENERGY_PERIOD_DAY,
-    ENERGY_PERIODS,
-)
+from .const import CONF_FAMILIES, CONF_SELECTED_DEVICES, DATA_AUX_CLOUD_CONFIG, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -392,7 +384,6 @@ class AuxCloudOptionsFlowHandler(OptionsFlow):
             try:
                 # Update the config entry with new selected devices
                 selected_device_ids = user_input.get(CONF_SELECTED_DEVICES, [])
-                energy_period = user_input.get(CONF_ENERGY_PERIOD, ENERGY_PERIOD_DAY)
 
                 # Convert to list if it's a single value
                 if not isinstance(selected_device_ids, list):
@@ -441,13 +432,7 @@ class AuxCloudOptionsFlowHandler(OptionsFlow):
                     self.config_entry.entry_id
                 )
 
-                return self.async_create_entry(
-                    title="",
-                    data={
-                        **self.config_entry.options,
-                        CONF_ENERGY_PERIOD: energy_period,
-                    },
-                )
+                return self.async_create_entry(title="", data={})
             except Exception as ex:
                 _LOGGER.error("Error updating config entry: %s", ex)
         # Fetch all devices to allow re-selection
@@ -505,10 +490,6 @@ class AuxCloudOptionsFlowHandler(OptionsFlow):
 
             # Get currently selected devices
             current_devices = self.config_entry.data.get(CONF_SELECTED_DEVICES, [])
-            current_period = self.config_entry.options.get(
-                CONF_ENERGY_PERIOD,
-                self.config_entry.data.get(CONF_ENERGY_PERIOD, ENERGY_PERIOD_DAY),
-            )
 
             return self.async_show_form(
                 step_id="init",
@@ -517,9 +498,6 @@ class AuxCloudOptionsFlowHandler(OptionsFlow):
                         vol.Required(
                             CONF_SELECTED_DEVICES, default=current_devices
                         ): cv.multi_select(device_options),
-                        vol.Required(
-                            CONF_ENERGY_PERIOD, default=current_period
-                        ): vol.In(ENERGY_PERIODS),
                     }
                 ),
                 description_placeholders={

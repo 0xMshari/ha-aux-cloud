@@ -68,10 +68,9 @@ PLATFORMS = [
 
 MAX_FAILED_POLLS = 5
 
-# Period energy meter (day / month / year) with TOTAL + last_reset
+# Period energy meters (day / month / year) with total_increasing
 POWER_CONSUMPTION_KEY = "power_consumption"
 POWER_UPDATE_INTERVAL = timedelta(minutes=15)
-CONF_ENERGY_PERIOD = "energy_period"
 ENERGY_PERIOD_DAY = "day"
 ENERGY_PERIOD_MONTH = "month"
 ENERGY_PERIOD_YEAR = "year"

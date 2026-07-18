@@ -25,7 +25,7 @@ from .api.const import (
     HP_HEATER_TEMPERATURE_TARGET,
 )
 from .const import DOMAIN, _LOGGER
-from .power_consumption import AuxCloudPowerSensor
+from .power_consumption import create_energy_sensors
 from .util import BaseEntity
 
 SENSORS: dict[str, dict[str, any]] = {
@@ -184,8 +184,8 @@ async def async_setup_entry(
         )
 
         if AuxProducts.supports_energy_stats(device.get("productId")):
-            entities.append(
-                AuxCloudPowerSensor(
+            entities.extend(
+                create_energy_sensors(
                     power_coordinator,
                     coordinator,
                     device["endpointId"],
