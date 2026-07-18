@@ -1,8 +1,8 @@
-"""Power consumption coordinator, sensor, and entity cleanup."""
+"""Energy consumption coordinator, sensor, and entity cleanup."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time, timezone
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -19,6 +19,7 @@ from homeassistant.helpers.entity_registry import (
     async_get as async_get_entity_registry,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .api.aux_cloud import (
     parse_device_stats_total,
@@ -39,33 +40,54 @@ from .const import (
 
 POWER_SENSOR_DESCRIPTION = SensorEntityDescription(
     key=POWER_CONSUMPTION_KEY,
-    name="Power Consumption",
+    name="Energy Consumption",
     icon="mdi:lightning-bolt",
     translation_key="power_consumption",
     device_class=SensorDeviceClass.ENERGY,
     native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+    # Period total for a configurable date range. last_reset tracks the period
+    # start so Home Assistant Energy can include the sensor.
     state_class=SensorStateClass.TOTAL,
 )
+
+
+def _parse_config_date(value) -> date | None:
+    """Parse a stored config date from ISO string, date, or datetime."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value[:10])
+        except ValueError:
+            return None
+    return None
 
 
 def get_power_period(entry: ConfigEntry) -> tuple[date, date]:
     """Return the configured consumption period, defaulting to today."""
     today = date.today()
-    start_raw = entry.options.get(CONF_POWER_START_DATE) or entry.data.get(
-        CONF_POWER_START_DATE
+    start = _parse_config_date(
+        entry.options.get(CONF_POWER_START_DATE)
+        or entry.data.get(CONF_POWER_START_DATE)
     )
-    end_raw = entry.options.get(CONF_POWER_END_DATE) or entry.data.get(
-        CONF_POWER_END_DATE
+    end = _parse_config_date(
+        entry.options.get(CONF_POWER_END_DATE) or entry.data.get(CONF_POWER_END_DATE)
     )
 
-    if start_raw and end_raw:
-        return date.fromisoformat(start_raw), date.fromisoformat(end_raw)
+    if start and end:
+        if end < start:
+            return end, start
+        return start, end
 
     return today, today
 
 
 class AuxCloudPowerCoordinator(DataUpdateCoordinator):
-    """Fetch power consumption for the configured date range."""
+    """Fetch energy consumption for the configured date range."""
 
     def __init__(
         self,
@@ -74,11 +96,11 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
         device_coordinator,
         entry: ConfigEntry,
     ):
-        """Initialize the power consumption coordinator."""
+        """Initialize the energy consumption coordinator."""
         super().__init__(
             hass,
             _LOGGER,
-            name="AUX Cloud Power Consumption",
+            name="AUX Cloud Energy Consumption",
             update_interval=POWER_UPDATE_INTERVAL,
         )
         self.api = api
@@ -116,13 +138,13 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
                 values = parse_device_stats_values(raw)
                 total_kwh = parse_device_stats_total(raw)
                 consumption[endpoint_id] = {
-                    "total_kwh": total_kwh,
+                    "total_kwh": 0.0 if total_kwh is None else total_kwh,
                     "values": values,
                     "data_points": len(values),
                 }
             except Exception as exc:
                 _LOGGER.warning(
-                    "Power consumption query failed for %s: %s",
+                    "Energy consumption query failed for %s: %s",
                     endpoint_id,
                     exc,
                 )
@@ -144,7 +166,7 @@ class AuxCloudPowerCoordinator(DataUpdateCoordinator):
 
 
 class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
-    """Power consumption for a configurable date range."""
+    """Energy consumption for a configurable date range."""
 
     def __init__(
         self,
@@ -186,15 +208,18 @@ class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True when consumption data exists for the period."""
+        """Return True when the device is present and a query result exists."""
         if self._device is None:
             return False
-        record = self._consumption_record
-        return record is not None and record.get("total_kwh") is not None
+        if not self.coordinator.last_update_success:
+            return False
+        return self._consumption_record is not None
 
     @property
     def _consumption_record(self) -> dict | None:
         """Return cached consumption for this device."""
+        if not self.coordinator.data:
+            return None
         return self.coordinator.data.get("consumption", {}).get(self._device_id)
 
     @property
@@ -206,9 +231,22 @@ class AuxCloudPowerSensor(CoordinatorEntity, SensorEntity):
         return record.get("total_kwh")
 
     @property
+    def last_reset(self) -> datetime | None:
+        """Return the start of the configured period for Energy dashboard stats."""
+        if not self.coordinator.data:
+            return None
+        start_raw = self.coordinator.data.get("period", {}).get("start_date")
+        start = _parse_config_date(start_raw)
+        if start is None:
+            return None
+
+        tzinfo = dt_util.get_default_time_zone() or timezone.utc
+        return datetime.combine(start, time.min, tzinfo=tzinfo)
+
+    @property
     def extra_state_attributes(self):
         """Return the active period and breakdown metadata."""
-        period = self.coordinator.data.get("period", {})
+        period = (self.coordinator.data or {}).get("period", {})
         record = self._consumption_record or {}
         return {
             "start_date": period.get("start_date"),

@@ -44,9 +44,11 @@
     "step": {
       "init": {
         "title": "Update AUX Cloud Devices",
-        "description": "Select which devices you want to monitor and control with Home Assistant.",
+        "description": "Select which devices you want to monitor and control with Home Assistant. Optionally set the energy consumption date range used by Energy Consumption sensors.",
         "data": {
-          "selected_devices": "Select Devices"
+          "selected_devices": "Select Devices",
+          "power_start_date": "Energy start date",
+          "power_end_date": "Energy end date"
         }
       }
     }
@@ -66,7 +68,7 @@
         "name": "AC Temperature"
       },
       "power_consumption": {
-        "name": "Power Consumption"
+        "name": "Energy Consumption"
       }
     },
     "water_heater": {

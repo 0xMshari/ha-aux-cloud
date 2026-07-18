@@ -12,7 +12,15 @@ from homeassistant.helpers.device_registry import async_get as async_get_device_
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
 from .api.aux_cloud import AuxCloudAPI
-from .const import DATA_AUX_CLOUD_CONFIG, DOMAIN, CONF_FAMILIES, CONF_SELECTED_DEVICES
+from .const import (
+    DATA_AUX_CLOUD_CONFIG,
+    DOMAIN,
+    CONF_FAMILIES,
+    CONF_POWER_END_DATE,
+    CONF_POWER_START_DATE,
+    CONF_SELECTED_DEVICES,
+)
+from .power_consumption import get_power_period
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -428,11 +436,23 @@ class AuxCloudOptionsFlowHandler(OptionsFlow):
                     self.config_entry, data=new_data
                 )
 
+                start_date = user_input.get(CONF_POWER_START_DATE)
+                end_date = user_input.get(CONF_POWER_END_DATE)
+                options_data = dict(self.config_entry.options)
+                if start_date and end_date:
+                    if end_date < start_date:
+                        start_date, end_date = end_date, start_date
+                    options_data = {
+                        **options_data,
+                        CONF_POWER_START_DATE: start_date.isoformat(),
+                        CONF_POWER_END_DATE: end_date.isoformat(),
+                    }
+
                 self.hass.config_entries.async_schedule_reload(
                     self.config_entry.entry_id
                 )
 
-                return self.async_create_entry(title="", data={})
+                return self.async_create_entry(title="", data=options_data)
             except Exception as ex:
                 _LOGGER.error("Error updating config entry: %s", ex)
         # Fetch all devices to allow re-selection
@@ -488,8 +508,9 @@ class AuxCloudOptionsFlowHandler(OptionsFlow):
                 family_name = device["family_name"]
                 device_options[device_id] = f"{device_name} ({family_name})"
 
-            # Get currently selected devices
+            # Get currently selected devices and energy period
             current_devices = self.config_entry.data.get(CONF_SELECTED_DEVICES, [])
+            current_start, current_end = get_power_period(self.config_entry)
 
             return self.async_show_form(
                 step_id="init",
@@ -498,6 +519,12 @@ class AuxCloudOptionsFlowHandler(OptionsFlow):
                         vol.Required(
                             CONF_SELECTED_DEVICES, default=current_devices
                         ): cv.multi_select(device_options),
+                        vol.Optional(
+                            CONF_POWER_START_DATE, default=current_start
+                        ): cv.date,
+                        vol.Optional(
+                            CONF_POWER_END_DATE, default=current_end
+                        ): cv.date,
                     }
                 ),
                 description_placeholders={

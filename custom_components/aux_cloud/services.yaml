@@ -1,8 +1,9 @@
 get_power_consumption:
-  name: Get power consumption
+  name: Get energy consumption
   description: >-
-    Query power consumption (kWh) for one device over any date range.
-    Returns the total and per-bucket values without changing the sensor period.
+    Query energy consumption (kWh) for one device over any date range.
+    Accepts any start/end dates (YYYY-MM-DD). Returns the total and per-bucket
+    values without changing the sensor period.
   fields:
     device_id:
       name: Device ID
@@ -13,14 +14,14 @@ get_power_consumption:
         text:
     start_date:
       name: Start date
-      description: First day of the period (YYYY-MM-DD).
+      description: First day of the period. Any calendar date is accepted.
       required: true
       example: "2026-06-01"
       selector:
         date:
     end_date:
       name: End date
-      description: Last day of the period (YYYY-MM-DD).
+      description: Last day of the period. Any calendar date is accepted.
       required: true
       example: "2026-06-26"
       selector:
@@ -40,20 +41,21 @@ get_power_consumption:
             - year
 
 set_power_consumption_period:
-  name: Set power consumption period
+  name: Set energy consumption period
   description: >-
-    Set the date range used by all Power Consumption sensors, then refresh them.
+    Set the date range used by all Energy Consumption sensors, then refresh them.
+    Accepts any start/end dates (YYYY-MM-DD).
   fields:
     start_date:
       name: Start date
-      description: First day of the period (YYYY-MM-DD).
+      description: First day of the period. Any calendar date is accepted.
       required: true
       example: "2026-06-01"
       selector:
         date:
     end_date:
       name: End date
-      description: Last day of the period (YYYY-MM-DD).
+      description: Last day of the period. Any calendar date is accepted.
       required: true
       example: "2026-06-26"
       selector:
