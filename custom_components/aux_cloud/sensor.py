@@ -114,6 +114,7 @@ SENSORS: dict[str, dict[str, any]] = {
     },
     # Live power (W). Required by apps like Vulpo that filter device_class=power.
     # Kept separate from the kWh Energy Consumption sensor.
+    # tenelec is fetched via AC_SPECIAL_PARAMS (not the empty-params query).
     AC_TENELEC: {
         "type": "power",
         "param": AC_TENELEC,
@@ -126,13 +127,20 @@ SENSORS: dict[str, dict[str, any]] = {
             native_unit_of_measurement=UnitOfPower.WATT,
             state_class=SensorStateClass.MEASUREMENT,
         ),
-        "get_fn": lambda d: (
-            d.get("params", {}).get(AC_TENELEC) / 10
-            if d.get("params", {}).get(AC_TENELEC) is not None
-            else None
-        ),
+        "get_fn": lambda d: _parse_live_power_watts(d),
     },
 }
+
+
+def _parse_live_power_watts(device: dict) -> float | None:
+    """Return instantaneous power in W from the live tenelec device param."""
+    raw = device.get("params", {}).get(AC_TENELEC)
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw) / 10
+    except (TypeError, ValueError):
+        return None
 
 
 async def async_setup_entry(
