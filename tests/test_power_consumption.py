@@ -39,6 +39,25 @@ def test_live_power_sensor_matches_vulpo_power_card_standard():
     assert power.name == "Power"
 
 
+def test_tenelec_is_fetched_as_special_param():
+    """Live power requires an explicit special-params fetch for tenelec."""
+    from custom_components.aux_cloud.api.const import AuxProducts
+
+    assert AC_TENELEC in AuxProducts.AC_SPECIAL_PARAMS
+    assert AC_TENELEC in AuxProducts.AC_PARAMS
+
+
+def test_parse_live_power_watts():
+    """Live tenelec values are scaled like other AUX x10 params."""
+    from custom_components.aux_cloud.sensor import _parse_live_power_watts
+
+    assert _parse_live_power_watts({"params": {"tenelec": 1250}}) == 125.0
+    assert _parse_live_power_watts({"params": {"tenelec": "80"}}) == 8.0
+    assert _parse_live_power_watts({"params": {"tenelec": 0}}) == 0.0
+    assert _parse_live_power_watts({"params": {}}) is None
+    assert _parse_live_power_watts({"params": {"tenelec": None}}) is None
+
+
 def test_parse_config_date_accepts_common_shapes():
     """Config dates may arrive as ISO strings, dates, or datetimes."""
     assert _parse_config_date("2026-06-01") == date(2026, 6, 1)

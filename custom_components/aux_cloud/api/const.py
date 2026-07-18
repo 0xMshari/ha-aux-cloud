@@ -169,7 +169,9 @@ class AuxProducts:
         AC_TENELEC,
     ]
 
-    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL]
+    # mode and tenelec are not returned by the empty-params query and must be
+    # fetched explicitly (same pattern as other "special" AC params).
+    AC_SPECIAL_PARAMS = [AC_MODE_SPECIAL, AC_TENELEC]
 
     HP_PARAMS = [
         "ac_errcode1",
